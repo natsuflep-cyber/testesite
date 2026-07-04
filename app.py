@@ -5,69 +5,77 @@ import requests
 
 app = Flask(__name__)
 
-# 🔑 ESCREVA SUA CHAVE DA API-FOOTBALL ENTRE AS ASPAS ABAIXO:
+# 🔑 Insira sua chave da API-Football aqui
 API_KEY = "3afab3b2657ded0519feb1cbb7dc606a"
 
-def buscar_dados_reais(nome_time):
+def buscar_estatisticas_reais(nome_time):
+    """
+    Busca o time de forma inteligente, descobre sua liga principal
+    e extrai a média real de gols marcados e sofridos na temporada atual.
+    """
     headers = {
         'x-rapidapi-host': "v3.football.api-sports.io",
         'x-rapidapi-key': API_KEY
     }
     
-    # 🔄 Dicionário simples para converter os nomes principais para o padrão da API
-    traducao = {
-        "brasil": "brazil",
-        "noruega": "norway",
-        "espanha": "spain",
-        "alemanha": "germany",
-        "inglaterra": "england",
-        "itália": "italy",
-        "italia": "italy",
-        "frança": "france",
-        "franca": "france"
-    }
-    
+    # Tradutor rápido para os casos mais comuns de digitação em português
+    traducao = {"brasil": "brazil", "noruega": "norway", "espanha": "spain", "alemanha": "germany", "inglaterra": "england", "frança": "france", "franca": "france", "itália": "italy", "italia": "italy"}
     nome_busca = nome_time.lower().strip()
     if nome_busca in traducao:
         nome_busca = traducao[nome_busca]
-        
-    url_time = f"https://v3.football.api-sports.io/teams?search={nome_busca}"
+
     try:
-        res_time = requests.get(url_time, headers=headers, timeout=10).json()
-        if not res_time.get('response'):
-            return None, None
+        # 1. Busca o ID do time
+        url_team = f"https://v3.football.api-sports.io/teams?search={nome_busca}"
+        res_team = requests.get(url_team, headers=headers, timeout=10).json()
         
-        id_time = res_time['response'][0]['team']['id']
+        if not res_team.get('response'):
+            return None, None, "Time não encontrado"
+            
+        id_time = res_team['response'][0]['team']['id']
         
-        # Buscando dados da liga padrão internacional (Copa/Amistosos)
-        url_stats = f"https://v3.football.api-sports.io/teams/statistics?season=2026&team={id_time}&league=1"
+        # 2. Descobre qual liga esse time está jogando na temporada atual (2026)
+        url_leagues = f"https://v3.football.api-sports.io/leagues?team={id_time}&current=true"
+        res_leagues = requests.get(url_leagues, headers=headers, timeout=10).json()
+        
+        if not res_leagues.get('response'):
+            # Se não achar liga em 2026, tenta buscar dados gerais de 2025
+            id_liga = 1
+            ano_temporada = 2025
+        else:
+            id_liga = res_leagues['response'][0]['league']['id']
+            ano_temporada = 2026
+
+        # 3. Busca as estatísticas reais de gols do time nessa liga específica
+        url_stats = f"https://v3.football.api-sports.io/teams/statistics?season={ano_temporada}&team={id_time}&league={id_liga}"
         res_stats = requests.get(url_stats, headers=headers, timeout=10).json()
         
-        # Caso o time não tenha jogado a liga 1, pegamos uma média padrão competitiva alta
-        if not res_stats.get('response') or not res_stats['response']['goals']['for']['average']['total']:
-            return 1.65, 1.05 # Valores padrão para times reais encontrados sem histórico na liga 1
-            
-        gols_feitos = res_stats['response']['goals']['for']['average']['total']
-        gols_sofridos = res_stats['response']['against']['average']['total']
+        stats = res_stats.get('response')
+        if not stats or not stats['goals']['for']['average']['total']:
+            return None, None, "Dados estatísticos insuficientes para este time na temporada."
+
+        # Média real de gols feitos e sofridos por jogo
+        gols_feitos = float(stats['goals']['for']['average']['total'])
+        gols_sofridos = float(stats['goals']['against']['average']['total'])
         
-        atq = float(gols_feitos) if gols_feitos else 1.3
-        df = float(gols_sofridos) if gols_sofridos else 1.1
-        
-        return atq, df
-    except Exception:
-        return None, None
+        return gols_feitos, gols_sofridos, None
+
+except Exception as e:
+        return None, None, f"Erro de conexão: {str(e)}"
 
 def calcular_probabilidades_placar(nome_casa, nome_fora):
-    at_casa, df_casa = buscar_dados_reais(nome_casa)
-    at_fora, df_fora = buscar_dados_reais(nome_fora)
+    at_casa, df_casa, erro_casa = buscar_estatisticas_reais(nome_casa)
+    at_fora, df_fora, erro_fora = buscar_estatisticas_reais(nome_fora)
     
-    # Validação rigorosa: se o time não existe no mundo real, para aqui
-    if at_casa is None or at_fora is None:
-        return {"erro": "Um ou ambos os times informados não foram encontrados na base de dados real! Verifique a grafia."}
+    if erro_casa or erro_fora:
+        return {"erro": f"Erro na análise: {erro_casa or erro_fora}"}
     
-    media_gols = 1.35
-    lambda_casa = at_casa * df_fora * media_gols
-    lambda_fora = at_fora * df_casa * media_gols
+    # Constante de ajuste baseada na média geral de gols de partidas oficiais de futebol (~2.7 gols por jogo / 2)
+    media_gols_campeonato = 1.35
+    
+    # Aplicação estrita do modelo de Poisson
+    lambda_casa = at_casa * df_fora * media_gols_campeonato
+    lambda_fora = at_fora * df_casa * media_gols_campeonato
     
     max_gols = 6
     matriz_placar = np.zeros((max_gols, max_gols))
