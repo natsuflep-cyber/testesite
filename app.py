@@ -1,36 +1,56 @@
 from flask import Flask, render_template_string, request
 import numpy as np
 from scipy.stats import poisson
-import hashlib
+import requests
 
 app = Flask(__name__)
 
-def gerar_dados_automaticos(nome_time):
-    """
-    Simula um Oráculo de IA/Scraper. Ele gera coeficientes matemáticos realistas 
-    estáveis baseados no nome do time usando criptografia de hash (fase 1 do modo automático).
-    Isso garante que Brasil, Real Madrid ou Flamengo sempre tenham forças proporcionais 
-    ao seu peso histórico sem quebrar por falta de internet na API externa.
-    """
-    hash_object = hashlib.md5(nome_time.lower().strip().encode())
-    numero_sorte = int(hash_object.hexdigest(), 16)
-    
-    # Gera forças de ataque e defesa realistas entre 0.8 e 1.9
-    ataque = 0.8 + (numero_sorte % 11) * 0.1
-    defesa = 0.7 + ((numero_sorte // 11) % 8) * 0.1
-    
-    # Ajustes manuais para times gigantes manterem o super favoritismo no algoritmo
-    gigantes = ['brasil', 'real madrid', 'manchester city', 'flamengo', 'palmeiras', 'argentina', 'frança']
-    if nome_time.lower().strip() in gigantes:
-        ataque += 0.4
-        defesa -= 0.2
+# 🔑 ESCREVA SUA CHAVE DA API-FOOTBALL ENTRE AS ASPAS ABAIXO:
+API_KEY = "SUA_CHAVE_AQUI"
 
-    return round(ataque, 2), round(defesa, 2)
+def buscar_dados_reais(nome_time):
+    """
+    Conecta com a API real de futebol, valida se o time existe
+    e calcula a média real de gols feitos e sofridos.
+    """
+    headers = {
+        'x-rapidapi-host': "v3.football.api-sports.io",
+        'x-rapidapi-key': API_KEY
+    }
+    
+    # 1. Busca o ID oficial do time na API para evitar erros de digitação
+    url_time = f"https://v3.football.api-sports.io/teams?search={nome_time}"
+    try:
+        res_time = requests.get(url_time, headers=headers, timeout=10).json()
+        if not res_time.get('response'):
+            return None, None # Time não existe de verdade
+        
+        id_time = res_time['response'][0]['team']['id']
+        
+        # 2. Busca o histórico de gols desse time (usamos uma liga padrão ou geral)
+        # Para o teste, pegamos estatísticas gerais recentes da temporada de 2026
+        url_stats = f"https://v3.football.api-sports.io/teams/statistics?season=2026&team={id_time}&league=1" # 1 = Copa do Mundo / Geral
+        res_stats = requests.get(url_stats, headers=headers, timeout=10).json()
+        
+        # Coleta as médias reais do banco de dados
+        gols_feitos = res_stats['response']['goals']['for']['average']['total']
+        gols_sofridos = res_stats['response']['against']['average']['total']
+        
+        # Converte para float (ex: "1.5" vira 1.5). Se não achar, define uma média padrão
+        atq = float(gols_feitos) if gols_feitos else 1.2
+        df = float(gols_sofridos) if gols_sofridos else 1.1
+        
+        return atq, df
+    except Exception:
+        return None, None
 
 def calcular_probabilidades_placar(nome_casa, nome_fora):
-    # O robô busca os dados sozinho aqui!
-    at_casa, df_casa = gerar_dados_automaticos(nome_casa)
-    at_fora, df_fora = gerar_dados_automaticos(nome_fora)
+    at_casa, df_casa = buscar_dados_reais(nome_casa)
+    at_fora, df_fora = buscar_dados_reais(nome_fora)
+    
+    # Validação rigorosa: se o time não existe no mundo real, para aqui
+    if at_casa is None or at_fora is None:
+        return {"erro": "Um ou ambos os times informados não foram encontrados na base de dados real! Verifique a grafia."}
     
     media_gols = 1.35
     lambda_casa = at_casa * df_fora * media_gols
@@ -65,54 +85,51 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IA Preditora Automática</title>
+    <title>IA Preditora Real-Time</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; background: #0f172a; color: #f8fafc; }
         .card { background: #1e293b; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border: 1px solid #334155; }
         h2 { text-align: center; color: #38bdf8; margin-top: 0; font-size: 24px; }
         p.subtitle { text-align: center; color: #94a3b8; font-size: 14px; margin-top: -15px; margin-bottom: 25px; }
         input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: white; box-sizing: border-box; font-size: 16px; }
-        input:focus { border-color: #38bdf8; outline: none; }
-        .vs { text-align: center; font-weight: bold; color: #64748b; margin: 5px 0 15px 0; }
-        button { background: #0284c7; color: white; border: none; padding: 14px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; font-weight: bold; transition: background 0.2s; }
-        button:hover { background: #0369a1; }
+        button { background: #0284c7; color: white; border: none; padding: 14px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 16px; font-weight: bold; }
         .resultado { margin-top: 25px; padding: 20px; background: #0c4a6e; border: 1px solid #0284c7; border-radius: 12px; text-align: center; }
+        .erro { margin-top: 25px; padding: 15px; background: #7f1d1d; border: 1px solid #ef4444; border-radius: 12px; text-align: center; color: #fca5a5; }
         .placar-box { font-size: 42px; font-weight: bold; color: #38bdf8; margin: 15px 0; letter-spacing: 3px; }
-        .stats-decor { font-size: 12px; color: #38bdf8; background: #1e293b; padding: 5px 10px; border-radius: 20px; display: inline-block; margin-bottom: 15px; }
         ul { list-style: none; padding: 0; text-align: left; max-width: 280px; margin: 15px auto 0 auto; }
         li { padding: 8px 0; border-bottom: 1px solid #0369a1; font-size: 15px; display: flex; justify-content: space-between; }
-        li:last-child { border: none; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>🤖 IA Preditora Automática</h2>
-        <p class="subtitle">Insira os times. A IA calcula as estatísticas.</p>
+        <h2>🌐 IA Preditora Profissional</h2>
+        <p class="subtitle">Conectada à API Oficial de Futebol (Dados 2026)</p>
         <form method="POST">
             <input type="text" name="casa" placeholder="Time da Casa (Ex: Brasil)" value="{{ casa if casa else '' }}" required>
-            <div class="vs">VS</div>
             <input type="text" name="fora" placeholder="Time de Fora (Ex: Noruega)" value="{{ fora if fora else '' }}" required>
-            <button type="submit">Analisar e Dar Palpite</button>
+            <button type="submit">Analisar Dados Reais</button>
         </form>
 
         {% if res %}
-        <div class="resultado">
-            <span class="stats-decor">📈 Estatísticas processadas automaticamente</span>
-            <h3>Palpite Calculado:</h3>
-            <p style="margin:0; color:#bae6fd; font-weight: bold;">{{ casa }} x {{ fora }}</p>
-            <div class="placar-box">{{ res.placar }}</div>
-            <p style="font-size: 13px; margin: 0 0 15px 0; color: #93c5fd;">Confiança Matemática: {{ res.confianca }}%</p>
-            
-            <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">
-                Média calculada: Força {{ casa }} ({{ res.at_casa }} Atq / {{ res.df_casa }} Def) | Força {{ fora }} ({{ res.at_fora }} Atq / {{ res.df_fora }} Def)
-            </div>
-            
-            <ul>
-                <li><span>🟢 Vitória {{ casa }}:</span> <strong>{{ res.p_casa }}%</strong></li>
-                <li><span>⚪ Empate:</span> <strong>{{ res.p_empate }}%</strong></li>
-                <li><span>🔴 Vitória {{ fora }}:</span> <strong>{{ res.p_fora }}%</strong></li>
-            </ul>
-        </div>
+            {% if res.erro %}
+                <div class="erro">
+                    ⚠️ {{ res.erro }}
+                </div>
+            {% else %}
+                <div class="resultado">
+                    <h3 style="margin:0; color:#bae6fd;">Palpite para {{ casa }} x {{ fora }}:</h3>
+                    <div class="placar-box">{{ res.placar }}</div>
+                    <p style="font-size: 13px; margin: 0 0 15px 0; color: #93c5fd;">Confiança Estatística: {{ res.confianca }}%</p>
+                    <div style="font-size: 11px; color: #94a3b8; margin-bottom: 10px;">
+                        Média real da API: {{ casa }} ({{ res.at_casa }} Gols/j) | {{ fora }} ({{ res.at_fora }} Gols/j)
+                    </div>
+                    <ul>
+                        <li><span>🟢 Vitória {{ casa }}:</span> <strong>{{ res.p_casa }}%</strong></li>
+                        <li><span>⚪ Empate:</span> <strong>{{ res.p_empate }}%</strong></li>
+                        <li><span>🔴 Vitória {{ fora }}:</span> <strong>{{ res.p_fora }}%</strong></li>
+                    </ul>
+                </div>
+            {% endif %}
         {% endif %}
     </div>
 </body>
