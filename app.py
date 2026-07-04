@@ -2,7 +2,7 @@ from flask import Flask, render_template_string, request
 import numpy as np
 from scipy.stats import poisson
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -15,6 +15,7 @@ def buscar_dados_e_palpite(nome_casa, nome_fora):
         'x-rapidapi-key': API_KEY
     }
     
+    # Padronização de nomes comuns para o inglês da API
     traducao = {
         "brasil": "brazil", "noruega": "norway", "espanha": "spain",
         "alemanha": "germany", "inglaterra": "england", "itália": "italy",
@@ -25,41 +26,45 @@ def buscar_dados_e_palpite(nome_casa, nome_fora):
     casa_busca = traducao.get(nome_casa.lower().strip(), nome_casa.lower().strip())
     fora_busca = traducao.get(nome_fora.lower().strip(), nome_fora.lower().strip())
     
+    # Valores padrão de força para o Modo Simulação
+    at_casa, df_casa, at_fora, df_fora = 1.6, 1.1, 1.4, 1.2
+    tipo_jogo = "Simulação de Amistoso"
+    info_extra = "Não encontramos este confronto na grade ao vivo de hoje/amanhã."
+    jogo_real = None
+
     try:
-        # 1. Buscar os IDs dos dois times na API para validar se existem no mundo real
-        res_casa = requests.get(f"https://v3.football.api-sports.io/teams?search={casa_busca}", headers=headers, timeout=10).json()
-        res_fora = requests.get(f"https://v3.football.api-sports.io/teams?search={fora_busca}", headers=headers, timeout=10).json()
+        # Vamos checar os jogos de Hoje e de Amanhã na API
+        hoje = datetime.now().strftime("%Y-%m-%d")
+        amanha = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         
-        if not res_casa.get('response') or not res_fora.get('response'):
-            return {"erro": "Um ou ambos os times não foram encontrados na base de dados real! Verifique a grafia."}
+        for data_analise in [hoje, amanha]:
+            url_fixtures = f"https://v3.football.api-sports.io/fixtures?date={data_analise}"
+            res_fixtures = requests.get(url_fixtures, headers=headers, timeout=10).json()
             
-        id_casa = res_casa['response'][0]['team']['id']
-        id_fora = res_fora['response'][0]['team']['id']
-        
-        # Valores padrão de gols (caso não ache histórico recente)
-        at_casa, df_casa, at_fora, df_fora = 1.6, 1.1, 1.4, 1.2
-        tipo_jogo = "Simulação de Amistoso"
-        info_extra = "Não há partidas oficiais agendadas para os próximos dias."
-        
-        # 2. Verificar se existe um próximo jogo agendado na agenda oficial
-        url_fixtures = f"https://v3.football.api-sports.io/fixtures?team={id_casa}&next=10"
-        res_fixtures = requests.get(url_fixtures, headers=headers, timeout=10).json()
-        
-        jogo_real = None
-        if res_fixtures.get('response'):
-            for f in res_fixtures['response']:
-                if f['teams']['away']['id'] == id_fora or f['teams']['home']['id'] == id_fora:
-                    jogo_real = f
-                    break
+            if res_fixtures.get('response'):
+                for f in res_fixtures['response']:
+                    h_name = f['teams']['home']['name'].lower()
+                    a_name = f['teams']['away']['name'].lower()
                     
-        # 3. Se o jogo for real, puxa dados específicos do campeonato real
+                    # Verifica se os times batem com o que o usuário digitou
+                    if (casa_busca in h_name and fora_busca in a_name) or (fora_busca in h_name and casa_busca in a_name):
+                        jogo_real = f
+                        break
+            if jogo_real:
+                break
+
+        # Se encontrou o jogo real na rodada de hoje ou amanhã
         if jogo_real:
+            id_casa = jogo_real['teams']['home']['id']
+            id_fora = jogo_real['teams']['away']['id']
             league_id = jogo_real['league']['id']
             season = jogo_real['league']['season']
             data_jogo = datetime.strptime(jogo_real['fixture']['date'][:10], "%Y-%m-%d").strftime("%d/%m/%Y")
-            tipo_jogo = f"Jogo Real Confirmado: {jogo_real['league']['name']}"
-            info_extra = f"Partida agendada para o dia {data_jogo}."
             
+            tipo_jogo = f"Jogo Real Confirmado: {jogo_real['league']['name']}"
+            info_extra = f"Partida oficial agendada para: {data_jogo}"
+            
+            # Busca estatísticas específicas daquele campeonato
             url_stats_casa = f"https://v3.football.api-sports.io/teams/statistics?season={season}&team={id_casa}&league={league_id}"
             url_stats_fora = f"https://v3.football.api-sports.io/teams/statistics?season={season}&team={id_fora}&league={league_id}"
             
@@ -75,8 +80,8 @@ def buscar_dados_e_palpite(nome_casa, nome_fora):
                     df_fora = float(res_stats_fora['response']['goals']['against']['average']['total'])
             except Exception:
                 pass
-                
-        # 4. Executa o cálculo estatístico de Poisson
+
+        # Executa o cálculo matemático de Poisson
         media_gols = 1.35
         lambda_casa = at_casa * df_fora * media_gols
         lambda_fora = at_fora * df_casa * media_gols
@@ -104,7 +109,7 @@ def buscar_dados_e_palpite(nome_casa, nome_fora):
             "real": True if jogo_real else False
         }
     except Exception:
-        return {"erro": "Erro ao conectar com o banco de dados de futebol. Tente novamente."}
+        return {"erro": "Erro ao conectar com o banco de dados. Tente novamente em instantes."}
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -140,6 +145,7 @@ HTML_TEMPLATE = """
         <p class="subtitle">Análise de Jogos Reais + Modo Simulação Ativo</p>
         <form method="POST">
             <input type="text" name="casa" placeholder="Time da Casa (Ex: Brasil)" value="{{ casa if casa else '' }}" required>
+            <div style="text-align:center; margin: 5px; font-weight:bold; color:#64748b;">VS</div>
             <input type="text" name="fora" placeholder="Time de Fora (Ex: Noruega)" value="{{ fora if fora else '' }}" required>
             <button type="submit">Gerar Palpite Inteligente</button>
         </form>
@@ -150,7 +156,7 @@ HTML_TEMPLATE = """
             {% else %}
                 <div class="resultado {{ 'modo-real' if res.real else 'modo-simulado' }}">
                     <div class="badge {{ 'badge-real' if res.real else 'badge-simulado' }}">{{ res.tipo }}</div>
-                    <p style="margin:5px 0; font-size:12px; color:#94a3b8;">{{ res.info }}</p>
+                    <p style="margin:5px 0; font-size:12px; color:#cbd5e1;">{{ res.info }}</p>
                     <h3 style="margin:10px 0 0 0; color:#f8fafc;">{{ casa }} x {{ fora }}</h3>
                     <div class="placar-box {{ 'color-real' if res.real else 'color-simulado' }}">{{ res.placar }}</div>
                     <p style="font-size: 13px; margin: 0 0 15px 0; color: #cbd5e1;">Confiança Estatística: {{ res.confianca }}%</p>
