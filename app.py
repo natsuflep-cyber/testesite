@@ -6,7 +6,7 @@ import requests
 app = Flask(__name__)
 
 # 🔑 ESCREVA SUA CHAVE DA API-FOOTBALL ENTRE AS ASPAS ABAIXO:
-API_KEY = "SUA_CHAVE_AQUI"
+API_KEY = "3afab3b2657ded0519feb1cbb7dc606a"
 
 def buscar_dados_reais(nome_time):
     """
