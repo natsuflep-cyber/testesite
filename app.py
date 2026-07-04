@@ -9,35 +9,48 @@ app = Flask(__name__)
 API_KEY = "3afab3b2657ded0519feb1cbb7dc606a"
 
 def buscar_dados_reais(nome_time):
-    """
-    Conecta com a API real de futebol, valida se o time existe
-    e calcula a média real de gols feitos e sofridos.
-    """
     headers = {
         'x-rapidapi-host': "v3.football.api-sports.io",
         'x-rapidapi-key': API_KEY
     }
     
-    # 1. Busca o ID oficial do time na API para evitar erros de digitação
-    url_time = f"https://v3.football.api-sports.io/teams?search={nome_time}"
+    # 🔄 Dicionário simples para converter os nomes principais para o padrão da API
+    traducao = {
+        "brasil": "brazil",
+        "noruega": "norway",
+        "espanha": "spain",
+        "alemanha": "germany",
+        "inglaterra": "england",
+        "itália": "italy",
+        "italia": "italy",
+        "frança": "france",
+        "franca": "france"
+    }
+    
+    nome_busca = nome_time.lower().strip()
+    if nome_busca in traducao:
+        nome_busca = traducao[nome_busca]
+        
+    url_time = f"https://v3.football.api-sports.io/teams?search={nome_busca}"
     try:
         res_time = requests.get(url_time, headers=headers, timeout=10).json()
         if not res_time.get('response'):
-            return None, None # Time não existe de verdade
+            return None, None
         
         id_time = res_time['response'][0]['team']['id']
         
-        # 2. Busca o histórico de gols desse time (usamos uma liga padrão ou geral)
-        # Para o teste, pegamos estatísticas gerais recentes da temporada de 2026
-        url_stats = f"https://v3.football.api-sports.io/teams/statistics?season=2026&team={id_time}&league=1" # 1 = Copa do Mundo / Geral
+        # Buscando dados da liga padrão internacional (Copa/Amistosos)
+        url_stats = f"https://v3.football.api-sports.io/teams/statistics?season=2026&team={id_time}&league=1"
         res_stats = requests.get(url_stats, headers=headers, timeout=10).json()
         
-        # Coleta as médias reais do banco de dados
+        # Caso o time não tenha jogado a liga 1, pegamos uma média padrão competitiva alta
+        if not res_stats.get('response') or not res_stats['response']['goals']['for']['average']['total']:
+            return 1.65, 1.05 # Valores padrão para times reais encontrados sem histórico na liga 1
+            
         gols_feitos = res_stats['response']['goals']['for']['average']['total']
         gols_sofridos = res_stats['response']['against']['average']['total']
         
-        # Converte para float (ex: "1.5" vira 1.5). Se não achar, define uma média padrão
-        atq = float(gols_feitos) if gols_feitos else 1.2
+        atq = float(gols_feitos) if gols_feitos else 1.3
         df = float(gols_sofridos) if gols_sofridos else 1.1
         
         return atq, df
