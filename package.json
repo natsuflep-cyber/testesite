@@ -1,0 +1,8 @@
+{
+  "name": "youtube-dl-vercel",
+  "version": "1.0.0",
+  "dependencies": {
+    "ytdl-core": "^4.11.5",
+    "cors": "^2.8.5"
+  }
+}
