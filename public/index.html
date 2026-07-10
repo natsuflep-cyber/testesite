@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube DL - Vercel</title>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 90%; max-width: 500px; text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        button { background: #ff0000; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
+        button:hover { background: #cc0000; }
+        .results { margin-top: 20px; text-align: left; }
+        .quality-item { background: #f8f9fa; padding: 10px; margin-bottom: 8px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
+        .download-btn { background: #007bff; color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 0.9rem; }
+        .error { color: red; margin-top: 10px; }
+        .loading { color: #666; margin-top: 10px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>YouTube Downloader</h2>
+        <input type="text" id="urlInput" placeholder="Cole o link do YouTube aqui">
+        <button onclick="fetchInfo()">Buscar Qualidades</button>
+        <div id="loading" class="loading">Processando...</div>
+        <div id="error" class="error"></div>
+        <div id="results" class="results"></div>
+    </div>
+
+    <script>
+        async function fetchInfo() {
+            const url = document.getElementById('urlInput').value;
+            const resultsDiv = document.getElementById('results');
+            const errorDiv = document.getElementById('error');
+            const loadingDiv = document.getElementById('loading');
+
+            resultsDiv.innerHTML = '';
+            errorDiv.textContent = '';
+            
+            if (!url) {
+                errorDiv.textContent = 'Por favor, insira uma URL válida.';
+                return;
+            }
+
+            loadingDiv.style.display = 'block';
+
+            try {
+                // Chama a API da Vercel (rota relativa)
+                const response = await fetch(`/api/get-info?url=${encodeURIComponent(url)}`);
+                const data = await response.json();
+
+                if (!response.ok) throw new Error(data.error || 'Erro desconhecido');
+
+                loadingDiv.style.display = 'none';
+
+                if (data.formats && data.formats.length > 0) {
+                    let html = `<h3>${data.title}</h3>`;
+                    data.formats.forEach(fmt => {
+                        html += `
+                            <div class="quality-item">
+                                <span><strong>${fmt.label}</strong> - ${fmt.size}</span>
+                                <a href="${fmt.url}" class="download-btn" target="_blank" download>Download</a>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+                } else {
+                    errorDiv.textContent = 'Nenhum formato encontrado.';
+                }
+
+            } catch (err) {
+                loadingDiv.style.display = 'none';
+                errorDiv.textContent = err.message;
+            }
+        }
+    </script>
+</body>
+</html>
